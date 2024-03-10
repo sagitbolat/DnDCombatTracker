@@ -1,101 +1,203 @@
-import tkinter as tk
+import curses
+import igraph as ig
 
-class DraggableToken:
-    def __init__(self, canvas, x, y, size, text, grid_size, cell_size, app):
-        self.canvas = canvas
-        self.size = size
-        self.text = text
-        self.grid_size = grid_size
-        self.cell_size = cell_size
-        self.token = canvas.create_oval(x, y, x + 2 * size, y + 2 * size, fill="white", outline="black", tags="token")
-        self.text_id = canvas.create_text(x + size, y + size, text=text, tags="token")
-        self.dragging = False
-        self.canvas.tag_bind(self.token, "<ButtonPress-1>", self.start_drag)
-        self.canvas.tag_bind(self.token, "<B1-Motion>", self.drag)
-        self.canvas.tag_bind(self.token, "<ButtonRelease-1>", self.stop_drag)
-        self.canvas.tag_bind(self.text_id, "<ButtonPress-1>", self.start_drag)
-        self.canvas.tag_bind(self.text_id, "<B1-Motion>", self.drag)
-        self.canvas.tag_bind(self.text_id, "<ButtonRelease-1>", self.stop_drag)
-        self.app = app
-        self.canvas.tag_bind(self.token, "<ButtonPress-3>", self.delete_token)  # Right-click to delete
-        self.canvas.tag_bind(self.text_id, "<ButtonPress-3>", self.delete_token)
+character_names={}
 
 
-    def start_drag(self, event):
-        self.dragging = True
-        self.canvas.tag_raise(self.token)
-        self.canvas.tag_raise(self.text_id)
+class Action:
+    def __init__(self, round, origin, target, hit, damage, notes):
+        self.round = round #which round this action took place. 1 round includes every creature's turn.
+        self.origin=origin #name of the person performng action
+        self.target=target #who the action targets
+        self.hit = hit #true = attack or spell succeeds, false = attack or spell fails
+        self.damage = damage
+        self.notes = notes
 
-    def drag(self, event):
-        if self.dragging:
-            x, y = event.x, event.y
-            self.canvas.coords(self.token, x - self.size, y - self.size, x + self.size, y + self.size)
-            self.canvas.coords(self.text_id, x, y)
-
-    def stop_drag(self, event):
-        if self.dragging:
-            self.dragging = False
-            x, y = event.x, event.y
-            grid_x = round((x - self.size) / self.cell_size) * self.cell_size + self.size
-            grid_y = round((y - self.size) / self.cell_size) * self.cell_size + self.size
-            self.canvas.coords(self.token, grid_x - self.size, grid_y - self.size, grid_x + self.size, grid_y + self.size)
-            self.canvas.coords(self.text_id, grid_x, grid_y)
-
-    def delete_token(self, event):
-        self.canvas.delete(self.token)
-        self.canvas.delete(self.text_id)
-        self.app.tokens.remove(self)
+    def to_string(self):
+        if self.hit:
+            return f"Round {self.round}: {self.origin} hits {self.target} for {self.damage} damage. NOTES: {self.notes}"
+        else:
+            return f"Round {self.round}: {self.origin} misses {self.target}. NOTES: {self.notes}"
 
 
-class GridApp:
-    def __init__(self, root, grid_size=8, screen_width = 1280, screen_height=720):
-        self.root = root
-        self.grid_size = grid_size
-        self.cell_size = screen_height/grid_size
-        self.token_size = self.cell_size/2
+def main(stdscr):
+    actions = []
+    # Clear screen
+    stdscr.clear()
+    curses.nocbreak() 
+    curses.start_color()
+    
+    curses.init_pair(1, curses.COLOR_BLUE, curses.COLOR_BLACK)
+    stdscr.addstr(0, 0, "Enter character names and initiative. Once you are done, enter 'END' as the name.", curses.color_pair(1))
+    stdscr.addstr(2,0, "=====================================")
 
-        self.frame = tk.Frame(root)
-        self.frame.pack(side=tk.LEFT)
+    curses.echo()
+    entering_names = True
+    current_row = 3
+    while(entering_names):
+        stdscr.move(1, 0)  # Move the cursor to the beginning of the second line
+        stdscr.clrtoeol()
+        stdscr.addstr(1, 0, "Name: ")
+        name = stdscr.getstr().decode()
+        stdscr.refresh()
 
-        self.canvas = tk.Canvas(root, width=screen_width, height=screen_height, bg="grey")
-        self.canvas.pack(side=tk.LEFT)
+        if name == "END":
+            break
+            entering_names = False
+        
+        stdscr.move(1, 0)  # Move the cursor to the beginning of the second line
+        stdscr.clrtoeol()
+        stdscr.addstr(1, 0, "Initiative: ")
+        initiative = stdscr.getstr().decode()
+        
+        if initiative == "END":
+            break
+            entering_names = False
+         
+        stdscr.refresh()
+        character_names[float(initiative)] = name
+        stdscr.addstr(current_row, 0, name + "|" + initiative)
+        current_row += 1
 
-        self.control_frame = tk.Frame(root)
-        self.control_frame.pack(side=tk.RIGHT, fill=tk.Y)
+    # Refresh the screen to show the changes
+    stdscr.refresh()
 
-        self.token_name_entry = tk.Entry(self.control_frame)
-        self.token_name_entry.pack()
-
-        self.add_token_button = tk.Button(self.control_frame, text="Add Token", command=self.add_token_from_entry)
-        self.add_token_button.pack()
-
-
-
-        self.draw_grid()
-        self.tokens = []
-
-    def draw_grid(self):
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
-                x, y = i * self.cell_size, j * self.cell_size
-                self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size, outline="white")
-
-    def add_token(self, x, y, color="token"):
-        grid_x = x * self.cell_size 
-        grid_y = y * self.cell_size 
-        token = DraggableToken(self.canvas, grid_x, grid_y, self.token_size, color, self.grid_size, self.cell_size, self)
-        self.tokens.append(token)
-
-    def add_token_from_entry(self):
-        text = self.token_name_entry.get()
-        if text:
-            self.add_token(0, 0, text)
-            self.token_name_entry.delete(0, tk.END)
+    curses.noecho()
+    sorted_characters = {k: character_names[k] for k in sorted(character_names, reverse=True)}
 
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = GridApp(root, 20, 720, 720)
-    app.add_token(1, 1, "A")  # Tokens are now specified by grid coordinates
-    app.add_token(3, 3, "B")
-    root.mainloop()
+    def single_seletion(list_of_seletions, selected_index, print_offset=0):
+
+        for i, selection in enumerate(list_of_seletions):
+            if i == selected_index:
+                stdscr.addstr(i + 1+print_offset, 0, f"> {selection}", curses.A_REVERSE)
+            else:
+                stdscr.addstr(i + 1+print_offset, 0, f"  {selection}")
+
+        stdscr.refresh()  # Refresh the screen to update the UI
+
+        stdscr.nodelay(True)
+        key = stdscr.getch()
+        stdscr.nodelay(False)
+        if key in [curses.KEY_UP, ord('w'), ord('W')]:
+            return (selected_index - 1) % len(list_of_seletions)
+        elif key in [curses.KEY_DOWN, ord('s'), ord('S')]:
+            return (selected_index + 1) % len(list_of_seletions)
+        elif key in [curses.KEY_ENTER, ord('\n'), ord('\r')]:
+            return -1
+        else: return selected_index
+
+
+    num_turns = 0
+    combat_ongoing = True
+    while combat_ongoing:
+        num_turns += 1
+        for initiative in sorted_characters:
+            curr_turn = True
+            while curr_turn:
+                name = sorted_characters[initiative]
+
+                # Display and select target
+                target_names = list(character_names.values())
+                selected_index = 0
+
+                target_names.append("END TURN")
+                target_names.append("END COMBAT")
+
+
+                #target selection
+                while True:
+                    stdscr.clear()  # Clear the screen at the start of each iteration
+
+                    stdscr.addstr(0, 0, f"Turn {num_turns}. ")
+                    stdscr.addstr(f"{name}'s", curses.color_pair(1))
+                    stdscr.addstr(f" turn.")
+                    stdscr.addstr(1, 0, f"Select Target:")
+
+                    sel = single_seletion(target_names, selected_index, 1)
+                    if (sel == -1):
+                        break
+                    selected_index = sel
+                    
+
+                target_name = target_names[selected_index] #NOTE: Record
+                if (target_name == "END COMBAT"):
+                    combat_ongoing = False
+                    break
+                if (target_name == "END TURN"):
+                    curr_turn = False
+                    break 
+                stdscr.addstr(len(target_names) + 2, 0, f"Selected target: {target_name}")
+
+                #hit prompt
+                hit = ["Yes", "No"]
+                selected_index=0
+                while True:
+                    stdscr.clear()  # Clear the screen at the start of each iteration
+
+                    stdscr.addstr(0, 0, f"{name}", curses.color_pair(1))
+                    stdscr.addstr(" targets ")
+                    stdscr.addstr(f"{target_name}", curses.color_pair(1))
+                    stdscr.addstr(1, 0, f"Does it hit/affect target?")
+                    sel = single_seletion(hit, selected_index, 1)
+                    if (sel == -1):
+                        break
+                    selected_index = sel
+                    
+
+                hit_or_not = hit[selected_index] #NOTE: record
+                if (hit_or_not == "Yes"):
+                    stdscr.addstr(4, 0, f"Enter Damage or effect: ")
+                    curses.echo()
+                    effect = stdscr.getstr().decode() #NOTE: Record
+                    curses.noecho()
+                else:
+                    effect = "Miss"
+
+                # additional Notes:
+                stdscr.addstr(5, 0, "Additional Notes: ")
+                curses.echo()
+                notes = stdscr.getstr().decode() #NOTE: Record
+                curses.noecho()
+
+                if (notes != "IGNORE"):
+                    action = Action(num_turns, name, target_name, hit_or_not, effect, notes)
+                    actions.append(action)
+                stdscr.refresh()
+
+    curses.endwin()
+
+
+    file_name = input("Save file name: ")
+    with open(f"{file_name}.txt", 'w') as file:
+        for action in actions:
+            file.write(action.to_string()+'\n')
+
+    actions_by_round = {}
+    for action in actions:
+        if action.round not in actions_by_round:
+            actions_by_round[action.round] = []
+        actions_by_round[action.round].append(action)
+
+    # Create a flowchart for each round
+    for round, actions in actions_by_round.items():
+        g = ig.Graph(directed=True)
+        vertices = set()
+        for action in actions:
+            vertices.add(action.origin)
+            vertices.add(action.target)
+        g.add_vertices(sorted(list(vertices)))
+        
+        for action in actions:
+            g.add_edge(action.origin, action.target)
+            edge_id = g.get_eid(action.origin, action.target)
+            g.es[edge_id]['label'] = f'{action.notes} ({action.damage})'
+            g.es[edge_id]['color'] = 'green' if action.hit else 'red'
+        
+        layout = g.layout('kk')  # Kamada-Kawai layout
+        ig.plot(g, f'round_{round}.png', layout=layout, bbox=(600, 600), margin=50, vertex_label=g.vs['name'], edge_label=g.es['label'], edge_color=g.es['color'], vertex_size=75) 
+ 
+
+
+# Initialize curses and call the main function
+curses.wrapper(main)
